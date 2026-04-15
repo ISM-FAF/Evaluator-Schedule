@@ -218,6 +218,19 @@
             margin-bottom: 12px;
         }
 
+        .personal-view-note {
+            display: none;
+            background: #fff7f2;
+            border: 1px solid var(--border);
+            color: var(--accent);
+            border-radius: 14px;
+            padding: 10px 12px;
+            font-size: 0.9rem;
+            line-height: 1.4;
+            margin-bottom: 12px;
+            font-weight: 600;
+        }
+
         .schedule-list {
             border: 1px solid var(--border);
             border-radius: 18px;
@@ -232,6 +245,18 @@
             font-size: 0.98rem;
             padding: 12px 14px;
             border-bottom: 1px solid var(--border);
+            border-left: 4px solid var(--accent);
+            position: sticky;
+            top: 8px;
+            z-index: 10;
+            box-shadow: 0 4px 10px rgba(120, 70, 45, 0.08);
+        }
+
+        .group-subtext {
+            font-size: 0.84rem;
+            font-weight: 600;
+            color: var(--muted);
+            margin-top: 4px;
         }
 
         .schedule-row {
@@ -338,6 +363,7 @@
             font-size: 0.9rem;
             line-height: 1.4;
             color: var(--text);
+            font-style: italic;
         }
 
         .empty-state {
@@ -407,7 +433,7 @@
         <section class="panel">
             <h2 class="section-title">Find Assignments</h2>
             <p class="section-subtitle">
-                Default view is sorted by start time for easy schedule scanning.
+                Default view is grouped by room for easy schedule scanning.
             </p>
 
             <div class="note-box">
@@ -438,9 +464,9 @@
 
                 <div>
                     <select id="sortFilter">
-                        <option value="start">Sort by Start Time</option>
-                        <option value="evaluator">Sort by Evaluator Name</option>
                         <option value="room">Sort by Room</option>
+                        <option value="evaluator">Sort by Evaluator Name</option>
+                        <option value="start">Sort by Start Time</option>
                     </select>
                 </div>
             </div>
@@ -453,6 +479,9 @@
             </div>
 
             <div class="status-message" id="statusMessage">Loading evaluator schedule...</div>
+            <div class="personal-view-note" id="personalViewNote">
+                Personal schedule view active.
+            </div>
             <div class="results-count" id="resultsCount"></div>
 
             <div id="resultsContainer">
@@ -478,6 +507,7 @@
         const resultsContainer = document.getElementById("resultsContainer");
         const resultsCount = document.getElementById("resultsCount");
         const statusMessage = document.getElementById("statusMessage");
+        const personalViewNote = document.getElementById("personalViewNote");
 
         function normalize(text) {
             return String(text || "").toLowerCase().trim();
@@ -586,30 +616,51 @@
         }
 
         function getGroupKey(row, sortValue) {
-            if (sortValue === "evaluator") return String(row["Evaluator"] || "").trim();
             if (sortValue === "room") return String(row["Room"] || "").trim();
+            if (sortValue === "evaluator") return String(row["Evaluator"] || "").trim();
             return "";
         }
 
         function getGroupHeaderLabel(groupKey, sortValue) {
+            if (sortValue === "room") return groupKey || "Unassigned Room";
             if (sortValue === "evaluator") return groupKey || "Unassigned Evaluator";
-            if (sortValue === "room") return groupKey ? `Room ${groupKey}` : "Unassigned Room";
+            return "";
+        }
+
+        function getGroupSubtext(groupRows, sortValue) {
+            if (!groupRows.length) return "";
+
+            if (sortValue === "room") {
+                const evaluatorCount = [...new Set(groupRows.map(row => String(row["Evaluator"] || "").trim()).filter(Boolean))].length;
+                return `${groupRows.length} assignment${groupRows.length === 1 ? "" : "s"} • ${evaluatorCount} evaluator${evaluatorCount === 1 ? "" : "s"}`;
+            }
+
+            if (sortValue === "evaluator") {
+                const roomCount = [...new Set(groupRows.map(row => String(row["Room"] || "").trim()).filter(Boolean))].length;
+                return `${groupRows.length} assignment${groupRows.length === 1 ? "" : "s"} • ${roomCount} room${roomCount === 1 ? "" : "s"}`;
+            }
+
             return "";
         }
 
         function sortRows(filtered, sortValue) {
             filtered.sort((a, b) => {
-                if (sortValue === "evaluator") {
-                    const evaluatorA = normalize(a["Evaluator"]);
-                    const evaluatorB = normalize(b["Evaluator"]);
-                    if (evaluatorA !== evaluatorB) return evaluatorA.localeCompare(evaluatorB);
-                    return timeToMinutes(a["Start Time"]) - timeToMinutes(b["Start Time"]);
-                }
-
                 if (sortValue === "room") {
                     const roomA = normalize(a["Room"]);
                     const roomB = normalize(b["Room"]);
                     if (roomA !== roomB) return roomA.localeCompare(roomB);
+
+                    const timeDiff = timeToMinutes(a["Start Time"]) - timeToMinutes(b["Start Time"]);
+                    if (timeDiff !== 0) return timeDiff;
+
+                    return normalize(a["Evaluator"]).localeCompare(normalize(b["Evaluator"]));
+                }
+
+                if (sortValue === "evaluator") {
+                    const evaluatorA = normalize(a["Evaluator"]);
+                    const evaluatorB = normalize(b["Evaluator"]);
+                    if (evaluatorA !== evaluatorB) return evaluatorA.localeCompare(evaluatorB);
+
                     return timeToMinutes(a["Start Time"]) - timeToMinutes(b["Start Time"]);
                 }
 
@@ -620,8 +671,9 @@
             });
         }
 
-        function renderRow(row) {
+        function renderRow(row, personalMode) {
             const note = String(row["Notes"] || "").trim();
+            const role = String(row["Role"] || "").trim();
 
             return `
         <div class="schedule-row">
@@ -629,9 +681,11 @@
           <div class="info-cell">
             <div class="top-line">
               <div class="evaluator-name">${escapeHtml(row["Evaluator"] || "")}</div>
-              <span class="${getRoleClass(row["Role"] || "")}">
-                ${escapeHtml(row["Role"] || "Unassigned")}
-              </span>
+              ${role ? `
+                <span class="${getRoleClass(role)}">
+                  ${escapeHtml(role)}
+                </span>
+              ` : ""}
             </div>
 
             <div class="details-grid">
@@ -699,6 +753,16 @@
 
             sortRows(filtered, sortValue);
 
+            const personalMode =
+                searchValue &&
+                !roomValue &&
+                !roleValue;
+
+            personalViewNote.style.display = personalMode ? "block" : "none";
+            personalViewNote.textContent = personalMode
+                ? "Personal schedule view active."
+                : "";
+
             resultsCount.textContent =
                 `${filtered.length} assignment${filtered.length === 1 ? "" : "s"} found`;
 
@@ -713,26 +777,30 @@
 
             let html = `<div class="schedule-list">`;
 
-            if (sortValue === "evaluator" || sortValue === "room") {
+            if (sortValue === "room" || sortValue === "evaluator") {
                 let currentGroupKey = null;
 
-                filtered.forEach(row => {
+                filtered.forEach((row, index) => {
                     const groupKey = getGroupKey(row, sortValue);
 
                     if (groupKey !== currentGroupKey) {
                         currentGroupKey = groupKey;
+
+                        const groupRows = filtered.filter(item => getGroupKey(item, sortValue) === groupKey);
+
                         html += `
               <div class="group-header">
-                ${escapeHtml(getGroupHeaderLabel(groupKey, sortValue))}
+                <div>${escapeHtml(getGroupHeaderLabel(groupKey, sortValue))}</div>
+                <div class="group-subtext">${escapeHtml(getGroupSubtext(groupRows, sortValue))}</div>
               </div>
             `;
                     }
 
-                    html += renderRow(row);
+                    html += renderRow(row, personalMode);
                 });
             } else {
                 filtered.forEach(row => {
-                    html += renderRow(row);
+                    html += renderRow(row, personalMode);
                 });
             }
 
@@ -744,7 +812,7 @@
             searchBox.value = "";
             roomFilter.value = "";
             roleFilter.value = "";
-            sortFilter.value = "start";
+            sortFilter.value = "room";
             displayResults();
         }
 
