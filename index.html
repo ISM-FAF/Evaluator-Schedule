@@ -729,7 +729,13 @@
             const searchValue = normalize(searchBox.value);
             const roomValue = normalize(roomFilter.value);
             const roleValue = normalize(roleFilter.value);
-            const sortValue = sortFilter.value;
+            let sortValue = sortFilter.value;
+
+            // If user is searching, switch to time view
+            if (searchValue) {
+                sortValue = "time";
+                sortFilter.value = "time"; // keeps dropdown in sync
+            }
 
             const filtered = allData.filter(row => {
                 const evaluator = normalize(row["Evaluator"]);
